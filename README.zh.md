@@ -437,11 +437,10 @@ A: 建议配置 `TOKEN` 环境变量启用鉴权：
 
 <image src="https://yrobot.top/donate_wx.jpeg" width="300"/>
 
-## Provider 修复 (1.1.2)
+## Provider 修复 (1.1.3)
 
-Brave 使用 HTML 解析，不执行脚本，也不复用 CAPTCHA Cookie。可通过 Worker
-secret `BRAVE_API_KEY` 使用官方 API。DuckDuckGo 支持属性顺序变化、直接和重定向
-链接；挑战页返回 `blocked`，未知结构返回 `parser_error`。
-
-运行 `npm ci`、`npm test` 和 `npm run dev`。Wrangler 开发环境需要 Node 22+。
+Brave 使用安全 HTML 解析，可通过 `BRAVE_API_KEY` 使用官方 API。
+DuckDuckGo 改用免费的 Instant Answer JSON API，不需要 API key，也不再抓取 HTML。
+摘要、定义和直接答案保留在 `instant_answers`；真实来源链接及相关主题进入 `results`。
+此 API 不提供完整网页搜索，空答案属于正常结果。Bing 和 Brave 继续提供网页搜索。
 生产部署尚未验证。详情见 [docs/usage.md](docs/usage.md)。

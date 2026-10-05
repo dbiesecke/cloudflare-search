@@ -1,4 +1,4 @@
-# Cloudflare Search — usage (1.1.2)
+# Cloudflare Search — usage (1.1.3)
 
 Source: https://github.com/dbiesecke/cloudflare-search
 
@@ -66,17 +66,19 @@ Cloudflare connector requires an account ID that its exposed read tools cannot p
 
 [openapi.yaml](../openapi.yaml) uses OpenAPI 3.1.1 and documents HTTP search,
 MCP discovery and JSON-RPC calls, including partial-success examples.
-Ten regression tests exercise the real Worker handler with controlled upstreams:
+Eleven regression tests exercise the real Worker handler with controlled upstreams:
 default partial results, disabled Google, hard deadlines, request configuration
 isolation, both MCP aliases and provider-specific parsing, safe script handling,
-URL decoding, CAPTCHA detection and optional Brave API authentication.
+DuckDuckGo JSON normalization, source-free answers, empty API responses,
+Brave CAPTCHA detection and optional Brave API authentication.
 These tests do not prove live provider availability.
 
 Live pre-change Bing returned 10 results on 2026-10-05. The deployed service has
 not been changed by this patch. On 2026-10-05 a direct Brave HTML capture yielded
 17 results with the new parser; the old parser found none of its expected data
-lines. DuckDuckGo returned HTTP 202 with an anomaly challenge, now reported as
-`blocked`. See [todo.md](../todo.md) for remaining deployment checks.
+lines. The DuckDuckGo JSON API returned valid HTTP 202 JSON: 23 normalized links
+and one summary for Python programming language, and zero for Berlin techno events.
+See [todo.md](../todo.md) for remaining deployment checks.
 
 ## Brave and DuckDuckGo providers
 
@@ -92,12 +94,35 @@ API requests use your configured Brave plan. No API key was available for a live
 API test; authentication and response handling were tested with controlled data.
 Official reference: https://api-dashboard.search.brave.com/app/documentation/web-search/codes
 
-DuckDuckGo parsing no longer depends on attribute order, double quotes, fixed
-class strings or a clearing div. It accepts direct links and `uddg` redirect URLs,
-rejects non-HTTP(S) URLs, decodes entities and skips marked advertisements.
-Challenge responses, including HTTP 202, return `error_type: blocked`. A known
-no-results marker returns `empty`; an unknown layout returns `parser_error`.
-Challenges are not solved or retried through alternate endpoints.
+DuckDuckGo now calls only `https://api.duckduckgo.com/` with `q`, `format=json`,
+`no_html=1` and `no_redirect=1`. No credentials are required. No HTML-search
+fallback, language filter, time filter or pagination is used for this API.
+
+`AbstractText`/`Abstract`, `Answer` and `Definition` become structured
+`instant_answers` with `type`, `title`, `text`, `url` and `source`. The aggregator
+adds `engine: duckduckgo`. A missing source URL stays null; no source is invented.
+Answers with valid source URLs also become normal link results. `Results` and
+nested `RelatedTopics[].Topics` are flattened and duplicate URLs removed.
+`number_of_results` counts links; it does not count source-free answers.
+Both Worker MCP aliases include answers in text and `structuredContent`.
+
+Example answer-only shape:
+
+```json
+{"number_of_results":0,"results":[],"instant_answers":[{"engine":"duckduckgo","type":"answer","title":"Calculation","text":"4","url":null,"source":null}]}
+```
+
+The Instant Answer service provides topic answers rather than a full ranked
+web-search list. Empty answer fields and empty topic arrays are normal and yield
+`empty`, not an upstream failure. HTTP 202 with valid API JSON is accepted;
+non-JSON or malformed payloads return `parser_error`, HTTP failures `http_error`.
+The original HTML CAPTCHA endpoint is no longer used. Bing/Brave remain the
+providers for general web and Event Radar queries.
+
+References:
+- https://api.duckduckgo.com/?q=Python%20programming%20language&format=json&no_html=1
+- https://duckduckgo.com/duckduckgo-help-pages/results/sources
+- https://freeapihub.com/apis/duckduckgo-instant-answer-api
 
 ## Local runtime validation
 

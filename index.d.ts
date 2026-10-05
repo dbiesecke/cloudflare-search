@@ -23,6 +23,14 @@ export type searchAll = (params: {
   number_of_results: number;
   enabled_engines: string[];
   unresponsive_engines: string[];
+  instant_answers: Array<{
+    engine: string;
+    type: "abstract" | "answer" | "definition";
+    title: string;
+    text: string;
+    url: string | null;
+    source: string | null;
+  }>;
   engine_diagnostics: Array<{
     engine: string;
     status: "ok" | "empty" | "disabled" | "timeout" | "error";

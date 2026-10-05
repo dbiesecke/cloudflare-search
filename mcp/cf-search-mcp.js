@@ -66,7 +66,7 @@ async function searchAPI(query, engines = null) {
 const server = new Server(
   {
     name: "cloudflare-search",
-    version: "1.1.2",
+    version: "1.1.3",
   },
   {
     capabilities: {
@@ -163,11 +163,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       "",
       "Results:",
       formattedResults,
+      ...(result.instant_answers || []).map((answer) => `${answer.type}: ${answer.title}: ${answer.text}${answer.url ? `\n${answer.url}` : ""}`),
     ]
       .filter(Boolean)
       .join("\n");
 
     return {
+      structuredContent: result,
       content: [
         {
           type: "text",

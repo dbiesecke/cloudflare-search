@@ -31,25 +31,44 @@ test("Brave reads current HTML, decodes entities, deduplicates and never execute
   delete globalThis.__braveExecuted;
 });
 
-test("DuckDuckGo accepts attribute order, extra classes, nested titles, direct and redirected URLs", async () => {
-  globalThis.fetch = async () => new Response(`
-    <div class='result extra'><h2><a href='//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2F%3Fa%3D1%26b%3D2&amp;rut=x' class='extra result__a'><b>Berlin</b> &amp; &#x1F3B5;</a></h2>
-    <div class='result__snippet'>Dates &amp; Tickets</div></div>
-    <div class='result'><a href='https://example.net/show' class='result__a'>Show</a><span class='result__snippet'>Live</span></div>
-    <div class='result result--ad'><a class='result__a' href='https://ads.example.org'>Advert</a></div>
-    <div class='result'><a class='result__a' href='javascript:alert(1)'>Invalid</a></div>
-    <div class='result'><a class='result__a'>Missing link</a></div>
-    <div class='result'><a class='result__a' href='//duckduckgo.com/l/?uddg=relative-path'>Invalid redirect</a></div>`);
-  const results = await duckduckgo({ query: "Berlin techno" });
-  assert.equal(results.length, 2);
-  assert.equal(results[0].url, "https://example.org/?a=1&b=2");
-  assert.equal(results[0].title, "Berlin & 🎵");
-  assert.equal(results[0].description, "Dates & Tickets");
-  assert.equal(results[1].url, "https://example.net/show");
+test("DuckDuckGo uses the JSON API and flattens nested topics with valid source URLs", async () => {
+  globalThis.fetch = async (url, options) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.hostname, "api.duckduckgo.com");
+    assert.equal(parsed.searchParams.get("format"), "json");
+    assert.equal(parsed.searchParams.get("no_html"), "1");
+    assert.equal(parsed.searchParams.get("q"), "Python & music");
+    assert.equal(options.headers.Accept, "application/json");
+    return new Response(JSON.stringify({ Heading: "Python", AbstractText: "Language", AbstractURL: "https://example.org/python",
+      Results: [{ FirstURL: "https://example.org/python", Text: "Duplicate" }],
+      RelatedTopics: [{ Name: "Topics", Topics: [{ FirstURL: "https://example.net/topic", Text: "Nested &amp; topic" },
+        { FirstURL: "javascript:alert(1)", Text: "Invalid" }] }] }), { status: 202 });
+  };
+  const result = await duckduckgo({ query: "Python & music" });
+  assert.equal(result.results.length, 2);
+  assert.equal(result.results[1].description, "Nested & topic");
+  assert.equal(result.instant_answers[0].type, "abstract");
+});
+
+test("DuckDuckGo direct answers without sources remain usable and empty API responses are successful", async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ Heading: "Calculation", Answer: "4", RelatedTopics: [], Results: [] }), { status: 202 });
+  const response = await worker.fetch(new Request("https://worker.test/mcp", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search", arguments: { query: "2+2", engines: ["duckduckgo"] } } }) }), {});
+  const result = (await response.json()).result;
+  assert.equal(result.structuredContent.results.length, 0);
+  assert.equal(result.structuredContent.instant_answers[0].url, null);
+  assert.equal(result.structuredContent.engine_diagnostics[0].status, "ok");
+  assert.ok(result.content[0].text.includes("Calculation: 4"));
+  globalThis.fetch = async () => new Response(JSON.stringify({ AbstractText: "", Answer: "", Definition: "", Results: [], RelatedTopics: [] }));
+  assert.deepEqual(await duckduckgo({ query: "Berlin techno events" }), { results: [], instant_answers: [] });
+  for (const body of ["<html>Challenge</html>", JSON.stringify({ error: "Unexpected" }), JSON.stringify({ RelatedTopics: {} })]) {
+    globalThis.fetch = async () => new Response(body);
+    await assert.rejects(duckduckgo({ query: "test" }), (error) => error.error_type === "parser_error");
+  }
 });
 
 test("challenge pages are blocked at HTTP 200 and 202; layout changes are parser errors, not empty success", async () => {
-  for (const search of [brave, duckduckgo]) {
+  for (const search of [brave]) {
     for (const status of [200, 202]) {
       globalThis.fetch = async () => new Response('<form id="challenge-form" action="//duckduckgo.com/anomaly.js"></form>', { status });
       await assert.rejects(search({ query: "test" }), (error) => error.error_type === "blocked" && error.http_status === status);
@@ -76,14 +95,14 @@ test("Brave API key stays in the header; bad credentials do not silently fall ba
   assert.equal(calls, 2);
 });
 
-test("Worker returns a distinct, credential-safe blocked diagnostic while preserving Brave results", async () => {
+test("Worker preserves Brave results when DuckDuckGo API returns HTTP errors", async () => {
   globalThis.fetch = async (url) => String(url).includes("brave.com")
     ? new Response(braveHtml)
-    : new Response('<form id="challenge-form">private upstream token</form>', { status: 202 });
+    : new Response("private upstream token", { status: 429 });
   const response = await worker.fetch(new Request("https://worker.test/search?q=Berlin&engines=brave,duckduckgo"), {});
   const result = await response.json();
   assert.equal(result.number_of_results, 1);
-  assert.equal(result.engine_diagnostics[1].error_type, "blocked");
-  assert.equal(result.engine_diagnostics[1].http_status, 202);
+  assert.equal(result.engine_diagnostics[1].error_type, "http_error");
+  assert.equal(result.engine_diagnostics[1].http_status, 429);
   assert.ok(!JSON.stringify(result).includes("private upstream token"));
 });

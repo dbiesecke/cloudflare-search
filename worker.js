@@ -89,11 +89,13 @@ async function searchSingle(engineName, query, config) {
         reject(Object.assign(new Error("Provider timed out."), { error_type: "timeout" }));
       }, timeout);
     });
-    const results = await Promise.race([
+    const response = await Promise.race([
       SEARCH_ENGINES[engineName]({ query, signal: controller.signal, config }), deadline,
     ]);
-    diagnostic.status = results.length ? "ok" : "empty";
-    return { results, diagnostic };
+    const results = Array.isArray(response) ? response : response.results;
+    const instant_answers = Array.isArray(response) ? [] : (response.instant_answers || []);
+    diagnostic.status = results.length || instant_answers.length ? "ok" : "empty";
+    return { results, instant_answers, diagnostic };
   } catch (error) {
     diagnostic.status = error.error_type === "timeout" || controller.signal.aborted ? "timeout" : "error";
     diagnostic.error_type = diagnostic.status === "timeout" ? "timeout" : (error.error_type || "provider_error");
@@ -123,6 +125,9 @@ async function searchAll({ query, engines }, config) {
     enabled_engines: diagnostics.filter((d) => d.status !== "disabled").map((d) => d.engine),
     unresponsive_engines: diagnostics.filter((d) => ["error", "timeout"].includes(d.status)).map((d) => d.engine),
     engine_diagnostics: diagnostics, results,
+    instant_answers: outcomes.flatMap((outcome, index) => (outcome.instant_answers || []).map((answer) => ({
+      ...answer, engine: selected[index],
+    }))),
   };
 }
 
@@ -176,6 +181,8 @@ function mcpTools() {
 }
 
 function formatSearchResultForMcp(result) {
+  const answers = (result.instant_answers || []).map((answer) =>
+    `[${answer.engine.toUpperCase()} ${answer.type}] ${answer.title}: ${answer.text}${answer.url ? `\n   ${answer.url}` : ""}`);
   if (!result.results || result.results.length === 0) {
     return [
       `Search query: ${result.query}`,
@@ -185,7 +192,7 @@ function formatSearchResultForMcp(result) {
         ? `Unresponsive engines: ${result.unresponsive_engines.join(", ")}`
         : null,
       "",
-      "No results returned.",
+      ...(answers.length ? ["Instant answers:", ...answers] : ["No results returned."]),
     ]
       .filter(Boolean)
       .join("\n");
@@ -214,6 +221,7 @@ function formatSearchResultForMcp(result) {
     );
   });
 
+  if (answers.length) lines.push("", "Instant answers:", ...answers);
   return lines.join("\n");
 }
 
@@ -229,7 +237,7 @@ async function handleMcpRpc(payload, config) {
       serverInfo: {
         name: "cloudflare-search",
         title: "Cloudflare Search",
-        version: "1.1.2",
+        version: "1.1.3",
       },
       instructions:
         "Use the search tools when the user asks for current web information, URLs, sources, or recent facts. Prefer concise queries and include URLs from the results.",
