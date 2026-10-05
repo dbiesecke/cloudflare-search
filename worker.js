@@ -100,6 +100,8 @@ async function searchSingle(engineName, query, config) {
     diagnostic.http_status = error.http_status || null;
     // Never return upstream bodies, URLs or exception messages that may contain credentials.
     diagnostic.message = diagnostic.status === "timeout" ? "Provider timed out."
+      : diagnostic.error_type === "blocked" ? "Provider requires a browser challenge."
+      : diagnostic.error_type === "parser_error" ? "Provider response format was not recognized."
       : diagnostic.http_status ? `Provider returned HTTP ${diagnostic.http_status}.`
       : "Provider request or response parsing failed.";
     return { results: [], diagnostic };
@@ -227,7 +229,7 @@ async function handleMcpRpc(payload, config) {
       serverInfo: {
         name: "cloudflare-search",
         title: "Cloudflare Search",
-        version: "1.1.1",
+        version: "1.1.2",
       },
       instructions:
         "Use the search tools when the user asks for current web information, URLs, sources, or recent facts. Prefer concise queries and include URLs from the results.",

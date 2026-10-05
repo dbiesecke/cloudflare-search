@@ -1,7 +1,7 @@
 openapi: 3.1.1
 info:
   title: Cloudflare Search
-  version: 1.1.1
+  version: 1.1.2
   description: Aggregated web search with per-provider diagnostics and MCP aliases.
 servers:
   - url: /
@@ -141,7 +141,10 @@ components:
         status: {type: string, enum: [ok, empty, disabled, timeout, error]}
         http_status: {type: [integer, 'null'], description: Upstream error status; null otherwise.}
         duration_ms: {type: integer, minimum: 0}
-        error_type: {type: [string, 'null']}
+        error_type:
+          type: [string, 'null']
+          enum: [missing_credentials, http_error, blocked, parser_error, timeout, provider_error, null]
+          description: Block pages and unrecognized layouts are errors rather than empty success.
         message: {type: [string, 'null'], description: Credential-safe diagnostic; upstream bodies are omitted.}
     SearchResult:
       type: object
@@ -209,7 +212,7 @@ components:
                   - {engine: bing, status: ok, http_status: null, duration_ms: 200, error_type: null, message: null}
                   - {engine: google, status: disabled, http_status: null, duration_ms: 0, error_type: missing_credentials, message: Configure GOOGLE_API_KEY and GOOGLE_CX.}
                   - {engine: brave, status: error, http_status: 429, duration_ms: 140, error_type: http_error, message: Provider returned HTTP 429.}
-                  - {engine: duckduckgo, status: timeout, http_status: null, duration_ms: 8000, error_type: timeout, message: Provider timed out.}
+                  - {engine: duckduckgo, status: error, http_status: 202, duration_ms: 200, error_type: blocked, message: Provider requires a browser challenge.}
                 results:
                   - {title: Berlin event listing, description: Lineup and ticket information, url: 'https://example.org/events/berlin', engine: bing}
     BadRequest:

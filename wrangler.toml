@@ -31,6 +31,7 @@ workers_dev = true
 # ============================================
 [vars]
 DEFAULT_TIMEOUT = "8000"
+# Optional Brave API key: set with `wrangler secret put BRAVE_API_KEY`.
 # Google Custom Search API 配置
 # GOOGLE_API_KEY = ""
 # GOOGLE_CX = ""

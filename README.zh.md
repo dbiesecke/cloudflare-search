@@ -436,3 +436,12 @@ A: 建议配置 `TOKEN` 环境变量启用鉴权：
 如果这个项目对你有帮助，可以请作者喝杯咖啡 ☕
 
 <image src="https://yrobot.top/donate_wx.jpeg" width="300"/>
+
+## Provider 修复 (1.1.2)
+
+Brave 使用 HTML 解析，不执行脚本，也不复用 CAPTCHA Cookie。可通过 Worker
+secret `BRAVE_API_KEY` 使用官方 API。DuckDuckGo 支持属性顺序变化、直接和重定向
+链接；挑战页返回 `blocked`，未知结构返回 `parser_error`。
+
+运行 `npm ci`、`npm test` 和 `npm run dev`。Wrangler 开发环境需要 Node 22+。
+生产部署尚未验证。详情见 [docs/usage.md](docs/usage.md)。

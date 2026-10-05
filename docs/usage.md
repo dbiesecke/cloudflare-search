@@ -1,4 +1,4 @@
-# Cloudflare Search — usage (1.1.1)
+# Cloudflare Search — usage (1.1.2)
 
 Source: https://github.com/dbiesecke/cloudflare-search
 
@@ -48,7 +48,8 @@ positive values are capped at 30000 milliseconds. A deadline also bounds provide
 that fail to honor abort signals. Configuration is isolated per request.
 
 ```sh
-npx wrangler dev
+npm ci
+npm run dev
 npm test
 npx wrangler secret put GOOGLE_API_KEY
 npx wrangler secret put GOOGLE_CX
@@ -65,10 +66,43 @@ Cloudflare connector requires an account ID that its exposed read tools cannot p
 
 [openapi.yaml](../openapi.yaml) uses OpenAPI 3.1.1 and documents HTTP search,
 MCP discovery and JSON-RPC calls, including partial-success examples.
-Five regression tests exercise the real Worker handler with controlled upstreams:
+Ten regression tests exercise the real Worker handler with controlled upstreams:
 default partial results, disabled Google, hard deadlines, request configuration
-isolation and both MCP aliases. These tests do not prove live provider availability.
+isolation, both MCP aliases and provider-specific parsing, safe script handling,
+URL decoding, CAPTCHA detection and optional Brave API authentication.
+These tests do not prove live provider availability.
 
 Live pre-change Bing returned 10 results on 2026-10-05. The deployed service has
-not been changed by this patch. Brave and DuckDuckGo scraping still require
-provider-specific investigation; see [todo.md](../todo.md).
+not been changed by this patch. On 2026-10-05 a direct Brave HTML capture yielded
+17 results with the new parser; the old parser found none of its expected data
+lines. DuckDuckGo returned HTTP 202 with an anomaly challenge, now reported as
+`blocked`. See [todo.md](../todo.md) for remaining deployment checks.
+
+## Brave and DuckDuckGo providers
+
+Brave HTML is parsed with `htmlparser2`; scripts are never evaluated and the fixed
+CAPTCHA cookie is removed. The parser reads organic result containers, validates
+HTTP(S) URLs, decodes text entities and removes duplicate URLs.
+
+Optional: set `BRAVE_API_KEY` with `npx wrangler secret put BRAVE_API_KEY`.
+When configured, Brave uses `https://api.search.brave.com/res/v1/web/search` and
+sends the key only in `X-Subscription-Token`. API errors do not silently fall back
+to scraping. Without a key, public HTML parsing remains the default.
+API requests use your configured Brave plan. No API key was available for a live
+API test; authentication and response handling were tested with controlled data.
+Official reference: https://api-dashboard.search.brave.com/app/documentation/web-search/codes
+
+DuckDuckGo parsing no longer depends on attribute order, double quotes, fixed
+class strings or a clearing div. It accepts direct links and `uddg` redirect URLs,
+rejects non-HTTP(S) URLs, decodes entities and skips marked advertisements.
+Challenge responses, including HTTP 202, return `error_type: blocked`. A known
+no-results marker returns `empty`; an unknown layout returns `parser_error`.
+Challenges are not solved or retried through alternate endpoints.
+
+## Local runtime validation
+
+Node 22+ is recommended for the installed Wrangler development dependency.
+`npm run dev` was attempted but failed in this execution environment while reading
+network interfaces (`uv_interface_addresses`). Wrangler deployment dry-run
+successfully bundled the Worker and HTML parser without publishing.
+No successful local HTTP server test or production deployment is claimed.

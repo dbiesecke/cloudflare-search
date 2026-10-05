@@ -1,71 +1,47 @@
 import { normalizeResults } from "./index.js";
+import { parseHtml, findAll, find, hasClass, text, safeUrl, providerError, checkResponse, uniqueResults } from "./providerHtml.js";
 
-// type subSearch under index.d.ts
-// TODO: support language, time_range, pageno
-async function searchBrave({ query, language, time_range, pageno, signal }) {
-  const searchUrl = `https://search.brave.com/search?q=${encodeURIComponent(
-    query
-  )}&spellcheck=0&source=web&summary=0`;
+export function extractBraveResults(document) {
+  const containers = findAll(document, (node) => hasClass(node, "result-content"));
+  return uniqueResults(containers.flatMap((container) => {
+    const title = find(container, (node) => hasClass(node, "search-snippet-title") || hasClass(node, "title"));
+    let link = title;
+    while (link && link !== container && link.name !== "a") link = link.parent;
+    if (link?.name !== "a") return [];
+    const url = safeUrl(link.attribs?.href, "https://search.brave.com");
+    if (!url || new URL(url).hostname === "search.brave.com") return [];
+    const snippet = find(container, (node) => hasClass(node, "generic-snippet") || hasClass(node, "snippet-description"));
+    return [{ title: text(title), url, description: text(snippet) }];
+  }));
+}
 
-  const response = await fetch(searchUrl, {
-    signal,
-    headers: {
-      accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-      "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7",
-      priority: "u=0, i",
-      "sec-ch-ua":
-        '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": '"macOS"',
-      "sec-fetch-dest": "document",
-      "sec-fetch-mode": "navigate",
-      "sec-fetch-site": "none",
-      "sec-fetch-user": "?1",
-      "upgrade-insecure-requests": "1",
-      cookie:
-        "ui_lang=zh; country=all; safesearch=off; useLocation=0; __Secure-sku#brave-search-captcha=eyJ0eXBlIjoic2luZ2xlLXVzZSIsInZlcnNpb24iOjEsInNrdSI6ImJyYXZlLXNlYXJjaC1jYXB0Y2hhIiwicHJlc2VudGF0aW9uIjoiZXlKcGMzTjFaWElpT2lKaWNtRjJaUzVqYjIwL2MydDFQV0p5WVhabExYTmxZWEpqYUMxallYQjBZMmhoSWl3aWMybG5ibUYwZFhKbElqb2lPRFY2YVU1S1JVMXFTbXhvTTI5TE5UUXhTMFJtTlZkdU4yWjJiall2VmtVMVVHTmFkMlIzV2poMGFreDBTR0V2Tm1SVVMyVjRZWFpSZVVKSFNIcHRVR0ZLUWtSbVFUTkxlV3gzUjNaSVkyZ3ZUVXhvTTFFOVBTSXNJblFpT2lKM1dVZzJTVTFVTlRsTGMzRnpaM1ptTWpVMVRDOHpOVlZrYzFVNU1sRnlSSGxGZVdoWVlXSXdOa2x3TVhscU1HMUlUa0ozUjNGVVpYTlliWGh1TlVGREx5OXdLMUpJUjJzemJrTTJVWHBQWW1aUFpVOHlVVDA5SW4wPSJ9",
-    },
-    referrer: "https://search.brave.com/search?source=web",
-  });
-
-  if (!response.ok) {
-    throw Object.assign(new Error("Upstream HTTP error."), {
-      error_type: "http_error", http_status: response.status,
+async function searchBrave({ query, signal, config = {} }) {
+  if (config.BRAVE_API_KEY) {
+    const params = new URLSearchParams({ q: query, count: "20" });
+    const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
+      signal, headers: { Accept: "application/json", "X-Subscription-Token": config.BRAVE_API_KEY },
     });
+    if (!response.ok) throw providerError("http_error", response.status);
+    let data;
+    try { data = await response.json(); } catch { throw providerError("parser_error", response.status); }
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw providerError("parser_error", response.status);
+    // Empty searches may omit web entirely; a present but malformed web object is an error.
+    if (data.web != null && !Array.isArray(data.web.results)) throw providerError("parser_error", response.status);
+    if (data.web == null && data.type !== "search") throw providerError("parser_error", response.status);
+    return uniqueResults(normalizeResults(data.web?.results || []).map((item) => ({
+      ...item, url: safeUrl(item.url), description: text(parseHtml(item.description)),
+    })));
   }
-  const html = await response.text();
-
-  if (!html) throw new Error("html is empty");
-
-  let data;
-
-  html.split("\n").forEach((line) => {
-    if (data) return;
-    if (line.trimStart().startsWith(`data: [{type:"data",`)) {
-      const pureLine = line.trim();
-      const jsonStr = pureLine.slice(
-        "data: ".length,
-        pureLine.endsWith(",") ? -1 : undefined
-      );
-      data = eval("(" + jsonStr + ")");
-    }
+  const params = new URLSearchParams({ q: query, source: "web" });
+  const response = await fetch(`https://search.brave.com/search?${params}`, {
+    signal, headers: { Accept: "text/html", "Accept-Language": "en-US,en;q=0.5" },
   });
-
-  if (!data) throw new Error("can't find data in html");
-
-  let result;
-
-  data.forEach((item) => {
-    if (result) return;
-    if (item?.data?.body?.response?.web?.results)
-      result = normalizeResults(item.data.body.response.web.results);
-  });
-
-  if (!result) throw new Error("can't find result in data");
-  if (!(result instanceof Array)) throw new Error("result is not an array");
-
-  return result;
+  const document = parseHtml(await response.text());
+  checkResponse(response, document);
+  const results = extractBraveResults(document);
+  if (results.length) return results;
+  if (find(document, (node) => hasClass(node, "no-results") || node.attribs?.id === "no-results")) return [];
+  throw providerError("parser_error", response.status);
 }
 
 export default searchBrave;

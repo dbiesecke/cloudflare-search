@@ -66,7 +66,7 @@ async function searchAPI(query, engines = null) {
 const server = new Server(
   {
     name: "cloudflare-search",
-    version: "1.1.0",
+    version: "1.1.2",
   },
   {
     capabilities: {

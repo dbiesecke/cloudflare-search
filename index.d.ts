@@ -40,5 +40,6 @@ export interface Env {
   DEFAULT_ENGINES?: string[];
   GOOGLE_API_KEY?: string;
   GOOGLE_CX?: string;
+  BRAVE_API_KEY?: string;
   TOKEN?: string;
 }

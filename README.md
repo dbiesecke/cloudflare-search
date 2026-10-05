@@ -8,7 +8,7 @@ English | [中文](./README.zh.md)
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://sink.proddig.com/cloudflare-search-github)
 
-## Search reliability (1.1.1)
+## Search reliability (1.1.2)
 
 Bing is now included in the default selection. Unconfigured Google is reported as
 `disabled` without an upstream request. Each response includes `engine_diagnostics`
@@ -21,7 +21,15 @@ curl "$CF_SEARCH_URL/search?q=Berlin%20techno&engines=bing" -H "Authorization: B
 ```
 
 See [usage and deployment](docs/usage.md) and the [OpenAPI 3.1.1 contract](openapi.yaml).
-Provider scraping may still fail; the fix preserves partial results and makes failures visible.
+Brave now parses current HTML without executing scripts or reusing CAPTCHA cookies.
+Set `BRAVE_API_KEY` as a Worker secret to use its official API instead of HTML.
+DuckDuckGo accepts reordered attributes, extra classes, nested text and direct or
+redirected links. CAPTCHA pages return `blocked`; unknown layouts return
+`parser_error`, so neither is reported as an empty successful search.
+
+Install dependencies with `npm ci`, then use `npm run dev` (Node 22+ for Wrangler).
+The recorded 2026-10-05 Brave HTML yields 17 results; DuckDuckGo returned an HTTP
+202 challenge from this environment. This does not establish production recovery.
 
 ## Features
 
