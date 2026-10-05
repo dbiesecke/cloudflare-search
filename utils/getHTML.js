@@ -4,10 +4,10 @@ import { env } from "../envs.js";
 // HTML 界面 - HTML UI
 // ============================================
 
-export function getSearchHtml() {
-  const GOOGLE_ENABLED = env.GOOGLE_API_KEY && env.GOOGLE_CX;
-  const TOKEN_ENABLED = !!env.TOKEN;
-  const DEFAULT_ENGINES = env.DEFAULT_ENGINES || [];
+export function getSearchHtml(config = env) {
+  const GOOGLE_ENABLED = config.GOOGLE_API_KEY && config.GOOGLE_CX;
+  const TOKEN_ENABLED = !!config.TOKEN;
+  const DEFAULT_ENGINES = config.DEFAULT_ENGINES || [];
   const handlerEngineDefaultChecked = (engine) =>
     DEFAULT_ENGINES.includes(engine) ? "checked" : "";
   return `<!DOCTYPE html>

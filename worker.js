@@ -1,4 +1,4 @@
-import { env, setEnv } from "./envs.js";
+import { env } from "./envs.js";
 import { getSearchHtml } from "./utils/getHTML.js";
 import searchGoogle from "./utils/searchGoogle.js";
 import searchBrave from "./utils/searchBrave.js";
@@ -57,96 +57,81 @@ function json(data, init = {}) {
   });
 }
 
-function parseEngines(enginesParam) {
-  if (!enginesParam) return env.DEFAULT_ENGINES || env.SUPPORTED_ENGINES;
-
-  return enginesParam
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter((e) => {
-      if (e === "google" && !(env.GOOGLE_API_KEY && env.GOOGLE_CX)) {
-        return false;
-      }
-
-      return env.SUPPORTED_ENGINES.includes(e);
-    });
+function parseEngines(enginesParam, config) {
+  const requested = enginesParam == null || enginesParam === ""
+    ? config.DEFAULT_ENGINES
+    : enginesParam;
+  const names = Array.isArray(requested) ? requested : String(requested).split(",");
+  return [...new Set(names.map((name) => String(name).trim().toLowerCase()))]
+    .filter((name) => config.SUPPORTED_ENGINES.includes(name) && SEARCH_ENGINES[name]);
 }
 
-async function searchSingle(engineName, query) {
-  const searchFn = SEARCH_ENGINES[engineName];
-
-  if (!searchFn) {
-    console.warn(`Unknown engine: ${engineName}`);
-    return [];
+async function searchSingle(engineName, query, config) {
+  const started = Date.now();
+  const diagnostic = {
+    engine: engineName, status: "error", http_status: null,
+    duration_ms: 0, error_type: null, message: null,
+  };
+  if (engineName === "google" && !(config.GOOGLE_API_KEY && config.GOOGLE_CX)) {
+    return { results: [], diagnostic: {
+      ...diagnostic, status: "disabled", error_type: "missing_credentials",
+      message: "Configure GOOGLE_API_KEY and GOOGLE_CX.",
+    } };
   }
-
   const controller = new AbortController();
-  const timeout = Number.parseInt(env.DEFAULT_TIMEOUT ?? "3000", 10);
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
+  const parsed = Number(config.DEFAULT_TIMEOUT);
+  const timeout = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 30000) : 8000;
+  let timeoutId;
   try {
-    return await searchFn({ query, signal: controller.signal });
+    const deadline = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(Object.assign(new Error("Provider timed out."), { error_type: "timeout" }));
+      }, timeout);
+    });
+    const results = await Promise.race([
+      SEARCH_ENGINES[engineName]({ query, signal: controller.signal, config }), deadline,
+    ]);
+    diagnostic.status = results.length ? "ok" : "empty";
+    return { results, diagnostic };
   } catch (error) {
-    if (error.name === "AbortError") {
-      console.error(`[${engineName}] Timeout after ${timeout}ms`);
-    } else {
-      console.error(`[${engineName}] Error:`, error.message);
-    }
-
-    return [];
+    diagnostic.status = error.error_type === "timeout" || controller.signal.aborted ? "timeout" : "error";
+    diagnostic.error_type = diagnostic.status === "timeout" ? "timeout" : (error.error_type || "provider_error");
+    diagnostic.http_status = error.http_status || null;
+    // Never return upstream bodies, URLs or exception messages that may contain credentials.
+    diagnostic.message = diagnostic.status === "timeout" ? "Provider timed out."
+      : diagnostic.http_status ? `Provider returned HTTP ${diagnostic.http_status}.`
+      : "Provider request or response parsing failed.";
+    return { results: [], diagnostic };
   } finally {
     clearTimeout(timeoutId);
+    diagnostic.duration_ms = Date.now() - started;
   }
 }
 
-async function searchAll({ query, engines }) {
-  const enabledEngines = Array.isArray(engines)
-    ? parseEngines(engines.join(","))
-    : parseEngines(engines);
-
-  const resultsArr = await Promise.allSettled(
-    enabledEngines.map((engine) => searchSingle(engine, query)),
-  );
-
-  const results = [];
-  const unresponsive = [];
-
-  resultsArr.forEach((result, index) => {
-    const engineName = enabledEngines[index];
-
-    if (result.status === "fulfilled" && result.value.length > 0) {
-      results.push(
-        ...result.value.map((item) => ({
-          ...item,
-          engine: engineName,
-        })),
-      );
-    } else {
-      unresponsive.push(engineName);
-
-      if (result.status === "rejected") {
-        console.error(`[${engineName}] Rejected:`, result.reason);
-      }
-    }
-  });
-
+async function searchAll({ query, engines }, config) {
+  const selected = parseEngines(engines, config);
+  const outcomes = await Promise.all(selected.map((engine) => searchSingle(engine, query, config)));
+  const results = outcomes.flatMap((outcome, index) => outcome.results.map((item) => ({
+    ...item, engine: selected[index],
+  })));
+  const diagnostics = outcomes.map((outcome) => outcome.diagnostic);
   return {
-    query,
-    number_of_results: results.length,
-    enabled_engines: enabledEngines,
-    unresponsive_engines: unresponsive,
-    results,
+    query, number_of_results: results.length,
+    enabled_engines: diagnostics.filter((d) => d.status !== "disabled").map((d) => d.engine),
+    unresponsive_engines: diagnostics.filter((d) => ["error", "timeout"].includes(d.status)).map((d) => d.engine),
+    engine_diagnostics: diagnostics, results,
   };
 }
 
-function verifyToken(request, paramToken) {
-  if (!env.TOKEN) return true;
+function verifyToken(request, paramToken, config) {
+  if (!config.TOKEN) return true;
 
   const authToken =
     request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ||
     paramToken;
 
-  return authToken === env.TOKEN;
+  return authToken === config.TOKEN;
 }
 
 function rpcResult(id, result) {
@@ -230,7 +215,7 @@ function formatSearchResultForMcp(result) {
   return lines.join("\n");
 }
 
-async function handleMcpRpc(payload) {
+async function handleMcpRpc(payload, config) {
   const { id, method, params } = payload;
 
   if (method === "initialize") {
@@ -242,7 +227,7 @@ async function handleMcpRpc(payload) {
       serverInfo: {
         name: "cloudflare-search",
         title: "Cloudflare Search",
-        version: "1.0.0",
+        version: "1.1.1",
       },
       instructions:
         "Use the search tools when the user asks for current web information, URLs, sources, or recent facts. Prefer concise queries and include URLs from the results.",
@@ -271,7 +256,7 @@ async function handleMcpRpc(payload) {
     const result = await searchAll({
       query: args.query,
       engines,
-    });
+    }, config);
 
     return rpcResult(id, {
       content: [
@@ -291,10 +276,10 @@ async function handleMcpRpc(payload) {
   return rpcError(id, -32601, `Method not found: ${method}`);
 }
 
-async function handleMcpRequest(request) {
+async function handleMcpRequest(request, config) {
   const url = new URL(request.url);
 
-  if (!verifyToken(request, url.searchParams.get("token"))) {
+  if (!verifyToken(request, url.searchParams.get("token"), config)) {
     return json(
       {
         error: "Unauthorized",
@@ -339,7 +324,7 @@ async function handleMcpRequest(request) {
       const responses = [];
 
       for (const item of payload) {
-        const response = await handleMcpRpc(item);
+        const response = await handleMcpRpc(item, config);
         if (response) responses.push(response);
       }
 
@@ -350,7 +335,7 @@ async function handleMcpRequest(request) {
       return json(responses);
     }
 
-    const response = await handleMcpRpc(payload);
+    const response = await handleMcpRpc(payload, config);
 
     if (!response) {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -364,7 +349,7 @@ async function handleMcpRequest(request) {
   }
 }
 
-async function handleSearchRequest(request) {
+async function handleSearchRequest(request, config) {
   const url = new URL(request.url);
 
   let params = {};
@@ -376,7 +361,7 @@ async function handleSearchRequest(request) {
     params = Object.fromEntries(url.searchParams.entries());
   }
 
-  if (!verifyToken(request, params.token)) {
+  if (!verifyToken(request, params.token, config)) {
     return json(
       {
         error: "Unauthorized",
@@ -399,12 +384,12 @@ async function handleSearchRequest(request) {
   }
 
   const engines = params.engines?.split(",").filter(Boolean) || undefined;
-  const response = await searchAll({ query, engines });
+  const response = await searchAll({ query, engines }, config);
 
   return json(response);
 }
 
-async function handleRequest(request) {
+async function handleRequest(request, config) {
   const url = new URL(request.url);
 
   if (request.method === "OPTIONS") {
@@ -412,7 +397,7 @@ async function handleRequest(request) {
   }
 
   if (url.pathname === "/mcp") {
-    return handleMcpRequest(request);
+    return handleMcpRequest(request, config);
   }
 
   if (request.method !== "GET" && request.method !== "POST") {
@@ -423,7 +408,7 @@ async function handleRequest(request) {
   }
 
   if (url.pathname === "/") {
-    return new Response(getSearchHtml(), {
+    return new Response(getSearchHtml(config), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         ...CORS_HEADERS,
@@ -432,7 +417,7 @@ async function handleRequest(request) {
   }
 
   if (url.pathname === "/search") {
-    return handleSearchRequest(request);
+    return handleSearchRequest(request, config);
   }
 
   return new Response("Not Found", {
@@ -443,7 +428,7 @@ async function handleRequest(request) {
 
 export default {
   async fetch(request, envParam) {
-    setEnv(envParam);
-    return handleRequest(request);
+    const config = { ...env, ...envParam };
+    return handleRequest(request, config);
   },
 };

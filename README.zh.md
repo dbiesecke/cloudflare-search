@@ -250,7 +250,7 @@ curl -X POST "https://$YOUR-DOMAIN/search" \
 
 | 变量名            | 类型     | 默认值   | 说明                                              |
 | ----------------- | -------- | -------- | ------------------------------------------------- |
-| `DEFAULT_TIMEOUT` | `string` | `"3000"` | 单个搜索引擎的超时时间（毫秒）                    |
+| `DEFAULT_TIMEOUT` | `string` | `"8000"` | 单个搜索引擎的超时时间（毫秒）                    |
 | `GOOGLE_API_KEY`  | `string` | `null`   | https://console.cloud.google.com/apis/credentials |
 | `GOOGLE_CX`       | `string` | `null`   | https://programmablesearchengine.google.com/      |
 | `TOKEN`           | `string` | `null`   | 访问令牌，配置后启用鉴权，保护服务不被滥用        |
@@ -270,7 +270,7 @@ curl -X POST "https://$YOUR-DOMAIN/search" \
 [vars]
 GOOGLE_API_KEY = "your-google-api-key"
 GOOGLE_CX = "your-google-custom-search-cx"
-DEFAULT_TIMEOUT = "3000"
+DEFAULT_TIMEOUT = "8000"
 TOKEN = "your-secret-token-here"
 ```
 
@@ -395,7 +395,7 @@ A: 建议：
 
 ### Q: Bing 搜索为什么默认禁用？
 
-A: Bing 搜索结果目前不够稳定，出现内容与搜索关联度低的情况。如需使用，可以在请求时手动指定：`engines=bing` 或修改 `envs.js` 中的 `DEFAULT_ENGINES`。
+A: Bing 现在默认启用。Google 缺少凭据时不会发起请求。每个引擎的状态可在 `engine_diagnostics` 中查看。
 
 ### Q: 如何保护服务不被滥用？
 

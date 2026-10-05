@@ -12,6 +12,7 @@ export type subSearch = (params: {
   time_range?: TimeRange;
   pageno?: number;
   signal?: AbortSignal;
+  config?: Env;
 }) => Promise<Array<ResultItem>>;
 
 export type searchAll = (params: {
@@ -22,6 +23,14 @@ export type searchAll = (params: {
   number_of_results: number;
   enabled_engines: string[];
   unresponsive_engines: string[];
+  engine_diagnostics: Array<{
+    engine: string;
+    status: "ok" | "empty" | "disabled" | "timeout" | "error";
+    http_status: number | null;
+    duration_ms: number;
+    error_type: string | null;
+    message: string | null;
+  }>;
   results: Array<ResultItem & { engine: string }>;
 }>;
 

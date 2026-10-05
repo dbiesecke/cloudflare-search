@@ -68,8 +68,9 @@ async function searchBing({ query, language, time_range, pageno, signal }) {
   });
 
   if (!response.ok) {
-    console.error(`Bing search failed: ${response.status}`);
-    return [];
+    throw Object.assign(new Error("Upstream HTTP error."), {
+      error_type: "http_error", http_status: response.status,
+    });
   }
 
   const html = await response.text();
