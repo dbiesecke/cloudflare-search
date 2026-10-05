@@ -8,6 +8,33 @@ English | [中文](./README.zh.md)
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://sink.proddig.com/cloudflare-search-github)
 
+## Search reliability (1.1.3)
+
+Bing is now included in the default selection. Unconfigured Google is reported as
+`disabled` without an upstream request. Each response includes `engine_diagnostics`
+with status, duration, HTTP error status and a credential-safe error category.
+The default provider deadline is 8 seconds; request configuration is isolated.
+
+```sh
+curl "$CF_SEARCH_URL/search?q=Berlin%20techno" -H "Authorization: Bearer $CF_SEARCH_TOKEN"
+curl "$CF_SEARCH_URL/search?q=Berlin%20techno&engines=bing" -H "Authorization: Bearer $CF_SEARCH_TOKEN"
+```
+
+See [usage and deployment](docs/usage.md) and the [OpenAPI 3.1.1 contract](openapi.yaml).
+Brave now parses current HTML without executing scripts or reusing CAPTCHA cookies.
+Set `BRAVE_API_KEY` as a Worker secret to use its official API instead of HTML.
+DuckDuckGo now calls `https://api.duckduckgo.com/?q=...&format=json&no_html=1&no_redirect=1`
+without an API key or HTML scraping. Summaries, definitions, direct answers and
+nested related topics are normalized. `instant_answers` retains answers without
+a source URL; only actual provider URLs become link results. This API supplies
+Instant Answers, so many event or general web queries return no DuckDuckGo data.
+Bing and Brave continue to supply web results.
+
+Install dependencies with `npm ci`, then use `npm run dev` (Node 22+ for Wrangler).
+Live API captures on 2026-10-05 normalize to 23 links plus one summary for
+“Python programming language”, and zero answers for “Berlin techno events”.
+These valid JSON responses used HTTP 202. Production deployment remains unverified.
+
 ## Features
 
 - 🔍 **Multi-engine Aggregation** - Use multiple search engines at the same time (Google, Brave, DuckDuckGo, Bing)
@@ -248,7 +275,7 @@ curl -X POST "https://$YOUR-DOMAIN/search" \
 
 | Variable Name      | Type     | Default  | Description                                         |
 | ------------------ | -------- | -------- | --------------------------------------------------- |
-| `DEFAULT_TIMEOUT`  | `string` | `"3000"` | Timeout per search engine request (milliseconds)   |
+| `DEFAULT_TIMEOUT`  | `string` | `"8000"` | Timeout per search engine request (milliseconds)   |
 | `GOOGLE_API_KEY`   | `string` | `null`   | https://console.cloud.google.com/apis/credentials  |
 | `GOOGLE_CX`        | `string` | `null`   | https://programmablesearchengine.google.com/       |
 | `TOKEN`            | `string` | `null`   | Access token. Enables auth when configured to prevent abuse |
@@ -268,7 +295,7 @@ Edit the `[vars]` section in `wrangler.toml`:
 [vars]
 GOOGLE_API_KEY = "your-google-api-key"
 GOOGLE_CX = "your-google-custom-search-cx"
-DEFAULT_TIMEOUT = "3000"
+DEFAULT_TIMEOUT = "8000"
 TOKEN = "your-secret-token-here"
 ```
 
@@ -391,9 +418,9 @@ A: Recommendations:
 - Reduce the number of enabled search engines and only use the engines you need
 - Adjust timeout (`DEFAULT_TIMEOUT`) appropriately
 
-### Q: Why is Bing search disabled by default?
+### Q: Which engines run by default?
 
-A: Bing search results are currently not stable enough, and may return content with low relevance to the query. If needed, you can manually specify `engines=bing` in requests or modify `DEFAULT_ENGINES` in `envs.js`.
+Bing, Google, Brave and DuckDuckGo are selected. Google only runs when both credentials are configured. Other providers execute concurrently, so their failure cannot discard Bing results. Explicit `engines` selection is respected.
 
 ### Q: How can I protect the service from abuse?
 

@@ -12,6 +12,7 @@ export type subSearch = (params: {
   time_range?: TimeRange;
   pageno?: number;
   signal?: AbortSignal;
+  config?: Env;
 }) => Promise<Array<ResultItem>>;
 
 export type searchAll = (params: {
@@ -22,6 +23,22 @@ export type searchAll = (params: {
   number_of_results: number;
   enabled_engines: string[];
   unresponsive_engines: string[];
+  instant_answers: Array<{
+    engine: string;
+    type: "abstract" | "answer" | "definition";
+    title: string;
+    text: string;
+    url: string | null;
+    source: string | null;
+  }>;
+  engine_diagnostics: Array<{
+    engine: string;
+    status: "ok" | "empty" | "disabled" | "timeout" | "error";
+    http_status: number | null;
+    duration_ms: number;
+    error_type: string | null;
+    message: string | null;
+  }>;
   results: Array<ResultItem & { engine: string }>;
 }>;
 
@@ -31,5 +48,6 @@ export interface Env {
   DEFAULT_ENGINES?: string[];
   GOOGLE_API_KEY?: string;
   GOOGLE_CX?: string;
+  BRAVE_API_KEY?: string;
   TOKEN?: string;
 }
